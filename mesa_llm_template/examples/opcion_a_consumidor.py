@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from llm import LLMClient  # noqa: E402
+from llm import LLMClient, StepProgress  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -114,6 +114,12 @@ class ConsumerAgent(mesa.Agent):
                                    "razon": "no parsable", "estado_emocional": "neutro"}
 
         self._apply(decision)
+        if self.model.progress is not None:
+            self.model.progress.tick(
+                self.model.steps_run + 1,
+                self.unique_id,
+                decision.get("accion", "esperar"),
+            )
 
     # ------------------------------------------------------ aplicar acción
     def _apply(self, decision: dict) -> None:
@@ -157,6 +163,7 @@ class MarketModel(mesa.Model):
         provider: str = "auto",
         model_name: str | None = None,
         seed: int | None = 42,
+        progress: StepProgress | None = None,
     ):
         super().__init__(rng=seed)
         self.steps_run = 0
@@ -166,6 +173,7 @@ class MarketModel(mesa.Model):
 
         self.llm = LLMClient(provider=provider, model=model_name)
         self.prompt_template = load_prompt()
+        self.progress = progress
 
         for i in range(n_agents):
             persona = PERSONAS[i % len(PERSONAS)]
@@ -270,23 +278,39 @@ def main() -> None:
                         choices=["auto", "openai", "anthropic", "ollama", "mock"])
     parser.add_argument("--model", default=None,
                         help="Override del modelo (ej: gpt-4o-mini)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="No mostrar progress en vivo")
     args = parser.parse_args()
 
     print(f">> provider seleccionado : {args.provider}")
-    model = MarketModel(
-        n_agents=args.n_agents, provider=args.provider, model_name=args.model
+    progress = StepProgress(
+        total_agents=args.n_agents, total_steps=args.steps,
+        provider=args.provider, enabled=not args.quiet,
     )
+    model = MarketModel(
+        n_agents=args.n_agents, provider=args.provider,
+        model_name=args.model, progress=progress,
+    )
+    progress.provider = model.llm.provider
     print(f">> provider efectivo     : {model.llm.provider} (model={model.llm.model})")
-    print(f">> {len(model.agents)} agentes, {args.steps} steps\n")
+    print(f">> {len(model.agents)} agentes · {args.steps} steps "
+          f"· {len(model.agents) * args.steps} llamadas LLM totales")
+
+    if model.llm.provider in ("ollama", "openai", "anthropic"):
+        print(">> calentando modelo... (cold start de VRAM puede tardar 10-30s)")
+        dt = model.llm.warmup()
+        print(f">> modelo listo en {dt:.1f}s\n")
+    else:
+        print()
 
     for t in range(1, args.steps + 1):
         model.step()
-        if t == 1 or t % 5 == 0 or t == args.steps:
-            actions_now = Counter(a.acciones[-1] for a in model.agents if a.acciones)
-            print(f"step {t:2d}  acciones={dict(actions_now)}  prices={model.prices}")
+        actions_now = Counter(a.acciones[-1] for a in model.agents if a.acciones)
+        progress.end_step(t, summary=f"acciones={dict(actions_now)}")
 
+    progress.finish()
     out_png = plot_results(model, ROOT / "examples" / "output")
-    print(f"\n>> {out_png}")
+    print(f">> {out_png}")
 
 
 if __name__ == "__main__":

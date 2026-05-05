@@ -48,16 +48,25 @@ class LLMClient:
         provider: str = "auto",
         model: str | None = None,
         temperature: float = 0.7,
-        timeout: float = 30.0,
+        timeout: float | None = None,
     ):
         self.temperature = temperature
-        self.timeout = timeout
 
         if provider == "auto":
             provider = self._auto_detect()
 
         self.provider = provider
         self.model = model or self._default_model(provider)
+
+        # Default timeouts: Ollama necesita más por el cold-start del modelo
+        if timeout is None:
+            timeout = {
+                "openai":    60.0,
+                "anthropic": 60.0,
+                "ollama":    180.0,   # 1ra carga del modelo a VRAM puede tardar
+                "mock":      5.0,
+            }.get(provider, 60.0)
+        self.timeout = timeout
 
     # ------------------------------------------------------------- helpers
     @staticmethod
@@ -161,10 +170,38 @@ class LLMClient:
             "format": "json",
             "stream": False,
             "options": {"temperature": self.temperature},
+            # Mantener el modelo cargado entre llamadas para no pagar el load cada vez
+            "keep_alive": "10m",
         }
         r = requests.post(url, json=payload, timeout=self.timeout)
         r.raise_for_status()
         return r.json()["response"]
+
+    # ----------------------------------------------------------------- warmup
+    def warmup(self) -> float:
+        """
+        Pre-carga el modelo (Ollama / proveedores reales) con una llamada
+        mínima para que la primera step no pague el cold-start.
+        Devuelve segundos transcurridos.
+        """
+        import time
+        t0 = time.perf_counter()
+        if self.provider == "ollama":
+            host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+            try:
+                requests.post(
+                    f"{host}/api/generate",
+                    json={"model": self.model, "prompt": "", "keep_alive": "10m"},
+                    timeout=self.timeout,
+                )
+            except Exception as e:
+                print(f"  ! warmup falló: {e}")
+        elif self.provider in ("openai", "anthropic"):
+            try:
+                self.complete_json('Devolvé {"ok": true}.', salt=0)
+            except Exception as e:
+                print(f"  ! warmup falló: {e}")
+        return time.perf_counter() - t0
 
 
 # --------------------------------------------------------------------------- #

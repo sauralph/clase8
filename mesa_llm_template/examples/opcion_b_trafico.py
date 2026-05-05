@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from llm import LLMClient  # noqa: E402
+from llm import LLMClient, StepProgress  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +116,10 @@ class CommuterAgent(mesa.Agent):
             f"día {self.model.steps_run+1}: {self.model.dia['clima']}, "
             f"{self.model.dia['transporte']} → fui en {modo} a las {hora}"
         )
+        if self.model.progress is not None:
+            self.model.progress.tick(
+                self.model.steps_run + 1, self.unique_id, modo
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -128,11 +132,13 @@ class TrafficModel(mesa.Model):
         provider: str = "auto",
         model_name: str | None = None,
         seed: int | None = 42,
+        progress: StepProgress | None = None,
     ):
         super().__init__(rng=seed)
         self.steps_run = 0
         self.llm = LLMClient(provider=provider, model=model_name)
         self.prompt_template = load_prompt()
+        self.progress = progress
 
         self.dia: dict = {}  # se rellena al inicio de cada step
         self.dias_log: list[dict] = []
@@ -251,22 +257,40 @@ def main() -> None:
     parser.add_argument("--provider", default="auto",
                         choices=["auto", "openai", "anthropic", "ollama", "mock"])
     parser.add_argument("--model", default=None)
+    parser.add_argument("--quiet", action="store_true",
+                        help="No mostrar progress en vivo")
     args = parser.parse_args()
 
-    model = TrafficModel(
-        n_agents=args.n_agents, provider=args.provider, model_name=args.model
+    progress = StepProgress(
+        total_agents=args.n_agents, total_steps=args.steps,
+        provider=args.provider, enabled=not args.quiet,
     )
-    print(f">> provider efectivo : {model.llm.provider}")
-    print(f">> {len(model.agents)} commuters · {args.steps} días\n")
+    model = TrafficModel(
+        n_agents=args.n_agents, provider=args.provider,
+        model_name=args.model, progress=progress,
+    )
+    progress.provider = model.llm.provider
+    print(f">> provider efectivo : {model.llm.provider} (model={model.llm.model})")
+    print(f">> {len(model.agents)} commuters · {args.steps} días "
+          f"· {len(model.agents) * args.steps} llamadas LLM")
+
+    if model.llm.provider in ("ollama", "openai", "anthropic"):
+        print(">> calentando modelo... (cold start de VRAM puede tardar 10-30s)")
+        dt = model.llm.warmup()
+        print(f">> modelo listo en {dt:.1f}s\n")
+    else:
+        print()
 
     for d in range(1, args.steps + 1):
         model.step()
-        if d == 1 or d % 3 == 0 or d == args.steps:
-            modos = Counter(a.modo_history[-1] for a in model.agents)
-            print(f"día {d:2d}  {model.dia}  modos={dict(modos)}")
+        modos = Counter(a.modo_history[-1] for a in model.agents)
+        progress.end_step(
+            d, summary=f"{model.dia['clima']:>9} · {model.dia['transporte']:>15} · modos={dict(modos)}"
+        )
 
+    progress.finish()
     out_png = plot_results(model, ROOT / "examples" / "output")
-    print(f"\n>> {out_png}")
+    print(f">> {out_png}")
 
 
 if __name__ == "__main__":
