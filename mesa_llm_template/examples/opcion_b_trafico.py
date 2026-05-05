@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from llm import LLMClient, StepProgress  # noqa: E402
+from llm import LLMClient, StepProgress, RunRecorder  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +116,18 @@ class CommuterAgent(mesa.Agent):
             f"día {self.model.steps_run+1}: {self.model.dia['clima']}, "
             f"{self.model.dia['transporte']} → fui en {modo} a las {hora}"
         )
+
+        if self.model.recorder is not None:
+            self.model.recorder.record(
+                step=self.model.steps_run + 1,
+                agent_id=self.unique_id,
+                persona=self.persona,
+                prompt=prompt,
+                raw_response=resp.text,
+                parsed=resp.parsed,
+                applied_action=modo,
+                extra={"hora_salida": hora, "rutina": self.rutina},
+            )
         if self.model.progress is not None:
             self.model.progress.tick(
                 self.model.steps_run + 1, self.unique_id, modo
@@ -133,15 +145,18 @@ class TrafficModel(mesa.Model):
         model_name: str | None = None,
         seed: int | None = 42,
         progress: StepProgress | None = None,
+        recorder: RunRecorder | None = None,
     ):
         super().__init__(rng=seed)
         self.steps_run = 0
         self.llm = LLMClient(provider=provider, model=model_name)
         self.prompt_template = load_prompt()
         self.progress = progress
+        self.recorder = recorder
 
         self.dia: dict = {}  # se rellena al inicio de cada step
         self.dias_log: list[dict] = []
+        self.step_meta: dict[int, dict[str, str]] = {}
 
         for i in range(n_agents):
             persona = PERSONAS_TRAFICO[i % len(PERSONAS_TRAFICO)]
@@ -157,6 +172,13 @@ class TrafficModel(mesa.Model):
     def step(self) -> None:
         self.dia = generar_dia(self.random)
         self.dias_log.append(self.dia.copy())
+        self.step_meta[self.steps_run + 1] = {
+            "evento": (
+                f"clima={self.dia['clima']} · tráfico={self.dia['trafico']} · "
+                f"transporte={self.dia['transporte']} · eventos={self.dia['eventos']}"
+            ),
+            "peer": "",
+        }
         self.agents.shuffle_do("step")
         self.steps_run += 1
 
@@ -259,15 +281,24 @@ def main() -> None:
     parser.add_argument("--model", default=None)
     parser.add_argument("--quiet", action="store_true",
                         help="No mostrar progress en vivo")
+    parser.add_argument("--no-record", action="store_true",
+                        help="No volcar JSONL/markdown a output/")
     args = parser.parse_args()
 
+    out_dir = ROOT / "examples" / "output"
     progress = StepProgress(
         total_agents=args.n_agents, total_steps=args.steps,
         provider=args.provider, enabled=not args.quiet,
     )
+    recorder = RunRecorder(
+        out_dir=out_dir, label="trafico",
+        provider=args.provider, model=args.model,
+        n_agents=args.n_agents, total_steps=args.steps,
+        enabled=not args.no_record,
+    )
     model = TrafficModel(
         n_agents=args.n_agents, provider=args.provider,
-        model_name=args.model, progress=progress,
+        model_name=args.model, progress=progress, recorder=recorder,
     )
     progress.provider = model.llm.provider
     print(f">> provider efectivo : {model.llm.provider} (model={model.llm.model})")
@@ -289,8 +320,14 @@ def main() -> None:
         )
 
     progress.finish()
-    out_png = plot_results(model, ROOT / "examples" / "output")
+    out_png = plot_results(model, out_dir)
     print(f">> {out_png}")
+
+    if recorder.enabled:
+        md_path = recorder.write_markdown(step_meta=model.step_meta)
+        recorder.close()
+        print(f">> {recorder.path_jsonl}")
+        print(f">> {md_path}")
 
 
 if __name__ == "__main__":

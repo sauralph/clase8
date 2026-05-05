@@ -115,6 +115,12 @@ python mesa_llm_template/examples/opcion_a_consumidor.py --provider ollama --ste
 Setup, prompts editables y opción avanzada (tráfico urbano) →
 [`mesa_llm_template/README.md`](mesa_llm_template/README.md).
 
+> Cada corrida vuelca a `mesa_llm_template/examples/output/`:
+> un PNG con los plots, un **JSONL** con cada llamada al LLM
+> (prompt + raw response + parsed) y un **markdown** legible
+> con la tabla de decisiones por step. Útil para revisar las
+> "razones" que dio el modelo en cada turno.
+
 ## Setup rápido
 
 Hay un `.venv/` propio dentro de esta carpeta para aislar las dependencias

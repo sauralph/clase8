@@ -92,6 +92,47 @@ python examples/opcion_a_consumidor.py --provider openai --model gpt-4o-mini
 pip install -r mesa_llm_template/requirements.txt
 ```
 
+## Outputs de cada corrida
+
+Después de cada `python examples/opcion_*.py`, en `examples/output/` quedan:
+
+```
+output/
+├── consumidor_resultado.png       # plot de la última corrida (acciones, gasto, precios)
+├── consumer_<YYYYMMDD_HHMMSS>.jsonl   # 1 registro por llamada al LLM
+└── consumer_<YYYYMMDD_HHMMSS>.md      # resumen humano legible (paso a paso)
+```
+
+### El JSONL (datos completos)
+
+Una línea por llamada con todo: `prompt` enviado, `raw_response` literal,
+`parsed` (JSON parseado), `applied_action` (qué se aplicó realmente),
+`presupuesto_disponible`, `turnos_esperando`, etc.
+
+Útil para post-mortem con `jq`, pandas, o un editor:
+
+```powershell
+# Cuántas veces dijo "comprar" pero se aplicó "esperar" (corregido por presupuesto):
+Get-Content output/consumer_*.jsonl | ConvertFrom-Json | Where-Object {
+    $_.parsed.accion -eq "comprar" -and $_.applied_action -eq "esperar"
+} | Measure-Object
+
+# Razones más mencionadas
+jq -r '.parsed.razon // empty' output/consumer_*.jsonl | sort | uniq -c | sort -rn
+```
+
+### El markdown (resumen humano)
+
+Una sección por step con tabla `agent | persona | acción | razón | estado | aplicada`.
+La columna **aplicada** marca con `→ X` cuando el sistema corrigió la acción
+del LLM (ej: dijo "comprar" pero no le alcanzaba → terminó en "esperar").
+
+Para no guardar logs:
+
+```powershell
+python examples/opcion_a_consumidor.py --no-record
+```
+
 ## En Colab
 
 Subí `notebook_colab.ipynb` a [colab.research.google.com](https://colab.research.google.com/),

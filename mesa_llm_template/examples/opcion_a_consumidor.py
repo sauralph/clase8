@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from llm import LLMClient, StepProgress  # noqa: E402
+from llm import LLMClient, StepProgress, RunRecorder  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -164,20 +164,35 @@ class ConsumerAgent(mesa.Agent):
         decision = resp.parsed or {"accion": "esperar", "producto_id": None,
                                    "razon": "no parsable", "estado_emocional": "neutro"}
 
-        self._apply(decision)
+        applied = self._apply(decision)
+
+        if self.model.recorder is not None:
+            self.model.recorder.record(
+                step=self.model.steps_run + 1,
+                agent_id=self.unique_id,
+                persona=self.persona,
+                prompt=prompt,
+                raw_response=resp.text,
+                parsed=resp.parsed,
+                applied_action=applied,
+                extra={
+                    "presupuesto_disponible": self.presupuesto - self.gastado,
+                    "turnos_esperando": self.turnos_esperando,
+                },
+            )
         if self.model.progress is not None:
             self.model.progress.tick(
                 self.model.steps_run + 1,
                 self.unique_id,
-                decision.get("accion", "esperar"),
+                applied,
             )
 
     # ------------------------------------------------------ aplicar acción
-    def _apply(self, decision: dict) -> None:
+    def _apply(self, decision: dict) -> str:
+        """Devuelve la acción efectivamente aplicada (puede diferir de decision.accion)."""
         accion = decision.get("accion", "esperar")
         pid = decision.get("producto_id")
         razon = decision.get("razon", "")
-        emo = decision.get("estado_emocional", "neutro")
 
         # Pricing dinámico (toy): el precio se mueve un poco si hay compras
         if accion == "comprar" and isinstance(pid, int) and 0 <= pid < len(PRODUCTS):
@@ -188,7 +203,7 @@ class ConsumerAgent(mesa.Agent):
                 self.acciones.append("comprar")
                 self.memoria.append(f"compré {PRODUCTS[pid]['nombre']} a ${price}")
                 self.turnos_esperando = 0
-                return
+                return "comprar"
             else:
                 accion = "esperar"
                 razon = "(corregido) no me alcanza"
@@ -200,7 +215,7 @@ class ConsumerAgent(mesa.Agent):
             self.acciones.append("negociar")
             self.memoria.append(f"regateé {PRODUCTS[pid]['nombre']}, ofrecí ${new_price}")
             self.turnos_esperando = 0
-            return
+            return "negociar"
 
         self.acciones.append("esperar")
         self.turnos_esperando += 1
@@ -208,6 +223,7 @@ class ConsumerAgent(mesa.Agent):
         # con eventos triviales que anclen al LLM en seguir esperando.
         if self.turnos_esperando % 2 == 1:
             self.memoria.append(f"esperé porque {razon}")
+        return "esperar"
 
 
 # --------------------------------------------------------------------------- #
@@ -221,6 +237,7 @@ class MarketModel(mesa.Model):
         model_name: str | None = None,
         seed: int | None = 42,
         progress: StepProgress | None = None,
+        recorder: RunRecorder | None = None,
     ):
         super().__init__(rng=seed)
         self.steps_run = 0
@@ -234,10 +251,13 @@ class MarketModel(mesa.Model):
         self.llm = LLMClient(provider=provider, model=model_name, temperature=temp)
         self.prompt_template = load_prompt()
         self.progress = progress
+        self.recorder = recorder
 
         # Estado de eventos / peer signal del turno actual
         self.evento_str = "primer turno, sin eventos"
         self.peer_signal = "(no hay turno previo)"
+        # Metadata por step para el markdown de la corrida
+        self.step_meta: dict[int, dict[str, str]] = {}
 
         for i in range(n_agents):
             persona = PERSONAS[i % len(PERSONAS)]
@@ -272,6 +292,12 @@ class MarketModel(mesa.Model):
             )
         else:
             self.peer_signal = "(no hay turno previo)"
+
+        # Guardamos meta del step ANTES de ejecutar (para el reporte)
+        self.step_meta[self.steps_run + 1] = {
+            "evento": self.evento_str,
+            "peer": self.peer_signal,
+        }
 
         self.agents.shuffle_do("step")
         self.steps_run += 1
@@ -370,18 +396,30 @@ def main() -> None:
                         help="Override del modelo (ej: gpt-4o-mini)")
     parser.add_argument("--quiet", action="store_true",
                         help="No mostrar progress en vivo")
+    parser.add_argument("--no-record", action="store_true",
+                        help="No volcar JSONL/markdown a output/")
     args = parser.parse_args()
 
+    out_dir = ROOT / "examples" / "output"
     print(f">> provider seleccionado : {args.provider}")
     progress = StepProgress(
         total_agents=args.n_agents, total_steps=args.steps,
         provider=args.provider, enabled=not args.quiet,
     )
+    recorder = RunRecorder(
+        out_dir=out_dir, label="consumer",
+        provider=args.provider, model=args.model,
+        n_agents=args.n_agents, total_steps=args.steps,
+        enabled=not args.no_record,
+    )
     model = MarketModel(
         n_agents=args.n_agents, provider=args.provider,
-        model_name=args.model, progress=progress,
+        model_name=args.model, progress=progress, recorder=recorder,
     )
     progress.provider = model.llm.provider
+    if recorder.enabled:
+        recorder.provider = model.llm.provider
+        recorder.model = model.llm.model
     print(f">> provider efectivo     : {model.llm.provider} (model={model.llm.model})")
     print(f">> {len(model.agents)} agentes · {args.steps} steps "
           f"· {len(model.agents) * args.steps} llamadas LLM totales")
@@ -399,8 +437,19 @@ def main() -> None:
         progress.end_step(t, summary=f"acciones={dict(actions_now)}")
 
     progress.finish()
-    out_png = plot_results(model, ROOT / "examples" / "output")
+    out_png = plot_results(model, out_dir)
     print(f">> {out_png}")
+
+    if recorder.enabled:
+        precios_str = "Precios finales: " + ", ".join(
+            f"{PRODUCTS[pid]['nombre']}=${p}" for pid, p in model.prices.items()
+        )
+        md_path = recorder.write_markdown(
+            step_meta=model.step_meta, extra_summary=precios_str,
+        )
+        recorder.close()
+        print(f">> {recorder.path_jsonl}")
+        print(f">> {md_path}")
 
 
 if __name__ == "__main__":
