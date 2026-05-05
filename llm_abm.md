@@ -473,9 +473,9 @@ class Boid(mesa.Agent):
 
 <!-- _footer: 'LLMs · Arquitectura' -->
 
-# Transformers en una slide
+# Transformers 
 
-## Lo mínimo que hay que saber
+## Breve repaso
 
 - Un **Transformer** procesa secuencias de *tokens* mediante capas de **self-attention**
 - Cada token "mira" a todos los anteriores y pondera su relevancia
@@ -739,7 +739,7 @@ def step(self):
 <!-- _class: dense -->
 <!-- _footer: 'Integración · Demo' -->
 
-# Demo en vivo · Plantilla de prompt
+# Plantilla de prompt
 
 ## Un agente consumidor en un mercado
 
@@ -764,8 +764,6 @@ Responde EXCLUSIVAMENTE como JSON con la forma:
 }}
 """
 ```
-
-> *(Demo: 12-15 min — mostrar simulación con 10-20 agentes)*
 
 ---
 
@@ -903,7 +901,6 @@ Responde EXCLUSIVAMENTE como JSON con la forma:
 - **Million-agent paper** (2025) — escalado masivo con archetypes
 - **Concordia** (DeepMind) — *world simulation* con agentes situados
 
-> *(5 min por caso, total ~20 min de la sección)*
 
 ---
 
@@ -912,7 +909,7 @@ Responde EXCLUSIVAMENTE como JSON con la forma:
 
 # 6. Desafíos y evaluación
 
-## ¿Qué puede salir mal?
+## ¿Qué puede malir sal?
 
 ---
 
@@ -997,19 +994,10 @@ Responde EXCLUSIVAMENTE como JSON con la forma:
 | **Behavioral realism**    | Acciones plausibles vs estudio humano de control          |
 | **Emergent validity**     | Aparecen patrones macro conocidos (Pareto, Zipf, etc.)   |
 | **Memory consistency**    | El agente *recuerda* y no se contradice                   |
-| **Cost per insight**      | $ y CO₂ por hallazgo útil                                |
+| **Cost per insight**      | $ por hallazgo útil                                |
 
 ---
 
-<!-- _class: quote -->
-<!-- _footer: 'Desafíos · Discusión' -->
-
-> ¿Cuál es el problema **ético** más grave del LLM-ABM **para vos**?
-> ¿Para qué casos *no* lo usarías?
-
-<p class="attrib">— Discusión grupal · 8 min</p>
-
----
 
 <!-- _class: divider -->
 <!-- _paginate: false -->
@@ -1022,7 +1010,7 @@ Responde EXCLUSIVAMENTE como JSON con la forma:
 
 <!-- _footer: 'Práctica · Opciones' -->
 
-# Elegí tu camino
+# Elige tu propia aventura
 
 ## Dos niveles de dificultad
 
@@ -1065,13 +1053,35 @@ Responde EXCLUSIVAMENTE como JSON con la forma:
 
 ## Para arrancar ahora
 
-- **Colab** — `[INSERTAR LINK]`
-- **Plantilla Mesa-LLM** — `github.com/[...]/mesa-llm-template`
-- **Ejemplos de prompts** — `prompts/` en el repo
-- **Dataset de ejemplo** — opiniones sobre marcas (Twitter público anonimizado)
-- **API keys de prueba** — repartidas al iniciar la actividad
+- **Plantilla Mesa-LLM** — `mesa_llm_template/` en el repo de la clase
+- **Notebook Colab** — `mesa_llm_template/notebook_colab.ipynb` *(subilo a [colab.research.google.com](https://colab.research.google.com))*
+- **Ejemplos runnables** — `examples/opcion_a_consumidor.py` y `opcion_b_trafico.py`
+- **Prompts editables** — `prompts/consumer.txt`, `commuter.txt`, `trader.txt`, `disaster_citizen.txt`
+- **Dataset de ejemplo** — `data/brand_opinions.csv` (32 opiniones sintéticas sobre 4 marcas)
+- **API keys** — repartidas al iniciar; alternativa: `--provider mock` corre 100% offline
 
-> Si todo falla: hay un *baseline* corriendo en local con Ollama listo para usar.
+---
+
+<!-- _footer: 'Práctica · Recursos' -->
+
+# Tres modos de correr
+
+## Probá el que más te sirva hoy
+
+```powershell
+# 1. Mock determinístico (sin internet, sin API key)
+python examples/opcion_a_consumidor.py --provider mock --steps 15
+
+# 2. Con OpenAI
+$env:OPENAI_API_KEY = "sk-..."
+python examples/opcion_a_consumidor.py --provider openai --model gpt-4o-mini
+
+# 3. Con Ollama local (si tenés llama3.2 corriendo)
+$env:OLLAMA_HOST = "http://localhost:11434"
+python examples/opcion_a_consumidor.py --provider ollama
+```
+
+> El `--provider mock` es **el plan B oficial**: si la wifi se cae o se rompe la API, la clase sigue.
 
 ---
 
