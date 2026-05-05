@@ -40,23 +40,71 @@ from llm import LLMClient, StepProgress  # noqa: E402
 # --------------------------------------------------------------------------- #
 #  Personas (edita esta lista para experimentar)
 # --------------------------------------------------------------------------- #
+# Personas con sesgo de acción EXPLÍCITO (clave para que el LLM no se ancle en
+# "esperar" todo el tiempo).
 PERSONAS = [
-    "ahorrativo, busca siempre el precio más bajo",
-    "ahorrativo, calcula todo antes de gastar",
-    "impulsivo, compra por antojo si le entra por los ojos",
-    "impulsivo, fashion-victim, sigue las modas",
-    "escéptico, desconfía del marketing y los descuentos",
-    "escéptico, lee reviews antes de cada compra",
-    "racional, evalúa relación precio-calidad fríamente",
-    "racional, pragmático, sin lealtad de marca",
-    "negociador, profesional del regateo",
-    "gourmet, valora calidad por sobre precio",
-    "minimalista, compra solo lo estrictamente necesario",
-    "ostentoso, le gusta mostrar lo que tiene",
-    "fiel a la marca, repite compras de Aurora siempre",
-    "joven, primera compra grande, sin experiencia",
-    "experimentado, lleva años comprando en este mercado",
+    "impulsivo: comprás casi siempre el primer producto que veas dentro de tu presupuesto",
+    "impulsivo, fashion-victim: comprás cualquier producto trendy aunque ya tengas uno parecido",
+    "ostentoso: te gusta gastar fuerte, comprás el producto más caro que puedas pagar",
+    "gourmet: comprás el producto que percibís como de mayor calidad, sin importar precio",
+    "negociador profesional: SIEMPRE intentás regatear primero; si baja el precio, comprás",
+    "regateador casual: probás regatear 1 vez por turno antes de comprar",
+    "racional: evaluás 1 turno y al siguiente comprás el de mejor precio/calidad",
+    "ahorrativo: solo comprás cuando ves descuentos; sino, regateás",
+    "ahorrativo extremo: solo comprás el producto más barato disponible",
+    "escéptico: desconfiás, pero después de 3 turnos esperando comprás algo barato",
+    "minimalista: comprás solo cosas baratas y necesarias (pan, café)",
+    "joven impaciente: si no comprás algo en 2 turnos te frustrás y comprás cualquier cosa",
 ]
+
+
+# Mapping persona-archetype → presupuesto típico, para que las decisiones
+# tengan sentido (un ostentoso sin plata no puede ostentar).
+def presupuesto_para(persona: str, rng) -> int:
+    p = persona.lower()
+    if "ostentoso" in p or "gourmet" in p:
+        return rng.choice([1500, 3000, 9000])
+    if "impulsivo" in p or "joven" in p:
+        return rng.choice([300, 500, 1500])
+    if "negociador" in p or "regateador" in p:
+        return rng.choice([200, 500, 1500])
+    if "racional" in p:
+        return rng.choice([200, 500, 1500])
+    if "minimalista" in p or "ahorrativo extremo" in p:
+        return rng.choice([60, 90, 120])
+    if "ahorrativo" in p or "escéptico" in p:
+        return rng.choice([90, 200, 500])
+    return rng.choice([200, 500, 1500])
+
+
+# --------------------------------------------------------------------------- #
+#  Eventos del turno (rompen el equilibrio "todos esperan")
+# --------------------------------------------------------------------------- #
+def generar_eventos(rng, prices: dict[int, int]) -> tuple[str, dict[int, float]]:
+    """
+    Devuelve (descripción legible, multiplicadores de precio por producto).
+    Tipos:
+      - promo : -25% en un producto random
+      - escasez : producto a punto de agotarse (no afecta precio, signal de urgencia)
+      - hype   : todos hablan de un producto (señal social)
+      - nada
+    """
+    multipliers = {pid: 1.0 for pid in prices}
+    kind = rng.choices(
+        ["promo", "escasez", "hype", "nada"], weights=[3, 2, 2, 3]
+    )[0]
+    if kind == "nada":
+        return "ningún evento especial hoy", multipliers
+    pid = rng.choice(list(prices.keys()))
+    nombre = PRODUCTS[pid]["nombre"]
+    if kind == "promo":
+        multipliers[pid] = 0.75
+        return f"PROMO -25% en {nombre} (id={pid}) sólo este turno", multipliers
+    if kind == "escasez":
+        return f"ESCASEZ: quedan pocas unidades de {nombre} (id={pid})", multipliers
+    if kind == "hype":
+        return f"HYPE: todos están hablando de {nombre} (id={pid}) en redes", multipliers
+    return "ningún evento especial hoy", multipliers
 
 
 PRODUCTS = [
@@ -94,19 +142,22 @@ class ConsumerAgent(mesa.Agent):
         self.gastado = 0
         self.memoria: list[str] = []
         self.acciones: list[str] = []  # historial propio
+        self.turnos_esperando = 0       # racha de "esperar" consecutivas
 
     def step(self) -> None:
         productos_str = ", ".join(
-            f"id={p['id']} {p['nombre']} (${self.model.prices[p['id']]})"
+            f"id={p['id']} {p['nombre']} (${self.model.prices_today[p['id']]})"
             for p in PRODUCTS
         )
         prompt = render_prompt(
             self.model.prompt_template,
             persona=self.persona,
-            memoria="; ".join(self.memoria[-3:]) or "(sin memoria)",
-            estado=f"step {self.model.steps_run}, oferta del día",
+            memoria="; ".join(self.memoria[-3:]) or "(sin memoria, primer turno)",
             productos=productos_str,
             presupuesto=self.presupuesto - self.gastado,
+            eventos=self.model.evento_str,
+            otros_agentes=self.model.peer_signal,
+            turnos_esperando=self.turnos_esperando,
         )
 
         resp = self.model.llm.complete_json(prompt, salt=self.unique_id * 31 + self.model.steps_run)
@@ -130,27 +181,33 @@ class ConsumerAgent(mesa.Agent):
 
         # Pricing dinámico (toy): el precio se mueve un poco si hay compras
         if accion == "comprar" and isinstance(pid, int) and 0 <= pid < len(PRODUCTS):
-            price = self.model.prices[pid]
+            price = self.model.prices_today[pid]
             if price <= (self.presupuesto - self.gastado):
                 self.gastado += price
                 self.model.demand[pid] += 1
                 self.acciones.append("comprar")
-                self.memoria.append(f"compré {PRODUCTS[pid]['nombre']} a ${price} ({razon})")
+                self.memoria.append(f"compré {PRODUCTS[pid]['nombre']} a ${price}")
+                self.turnos_esperando = 0
                 return
             else:
-                accion = "esperar"  # no puede pagar
+                accion = "esperar"
                 razon = "(corregido) no me alcanza"
         if accion == "negociar" and isinstance(pid, int) and 0 <= pid < len(PRODUCTS):
-            price = self.model.prices[pid]
+            price = self.model.prices_today[pid]
             descuento = self.model.random.uniform(0.05, 0.15)
             new_price = int(price * (1 - descuento))
             self.model.proposed_discounts[pid].append(new_price)
             self.acciones.append("negociar")
-            self.memoria.append(f"intenté regatear {PRODUCTS[pid]['nombre']} a ${new_price}")
+            self.memoria.append(f"regateé {PRODUCTS[pid]['nombre']}, ofrecí ${new_price}")
+            self.turnos_esperando = 0
             return
 
         self.acciones.append("esperar")
-        self.memoria.append(f"esperé ({razon}, {emo})")
+        self.turnos_esperando += 1
+        # Solo guardamos memoria de "esperar" cada 2 turnos para no saturar
+        # con eventos triviales que anclen al LLM en seguir esperando.
+        if self.turnos_esperando % 2 == 1:
+            self.memoria.append(f"esperé porque {razon}")
 
 
 # --------------------------------------------------------------------------- #
@@ -168,18 +225,24 @@ class MarketModel(mesa.Model):
         super().__init__(rng=seed)
         self.steps_run = 0
         self.prices = {p["id"]: p["precio_base"] for p in PRODUCTS}
+        self.prices_today: dict[int, int] = dict(self.prices)  # con eventos aplicados
         self.demand: Counter[int] = Counter()
         self.proposed_discounts: dict[int, list[int]] = defaultdict(list)
 
-        self.llm = LLMClient(provider=provider, model=model_name)
+        # Bump temperatura para LLMs reales: a 0.7 se estancan en "esperar".
+        temp = 0.95 if provider in ("ollama", "openai", "anthropic", "auto") else 0.7
+        self.llm = LLMClient(provider=provider, model=model_name, temperature=temp)
         self.prompt_template = load_prompt()
         self.progress = progress
 
+        # Estado de eventos / peer signal del turno actual
+        self.evento_str = "primer turno, sin eventos"
+        self.peer_signal = "(no hay turno previo)"
+
         for i in range(n_agents):
             persona = PERSONAS[i % len(PERSONAS)]
-            presupuesto = self.random.choice([60, 90, 120, 200, 500, 1500, 9000])
+            presupuesto = presupuesto_para(persona, self.random)
             agent = ConsumerAgent(self, persona=persona, presupuesto=presupuesto)
-            # asignamos un unique_id estable para el salt del mock
             agent.unique_id = i
 
         self.history_prices: dict[int, list[float]] = {p["id"]: [] for p in PRODUCTS}
@@ -188,6 +251,27 @@ class MarketModel(mesa.Model):
         self.demand.clear()
         for d in self.proposed_discounts.values():
             d.clear()
+
+        # Generar evento del turno y aplicar al precio del día
+        self.evento_str, mults = generar_eventos(self.random, self.prices)
+        self.prices_today = {pid: max(1, int(round(self.prices[pid] * m)))
+                             for pid, m in mults.items()}
+
+        # Peer signal: qué hicieron los agentes el turno pasado
+        if self.steps_run > 0:
+            last_actions = Counter(a.acciones[-1] for a in self.agents if a.acciones)
+            top_buys = Counter()
+            for a in self.agents:
+                if a.acciones and a.acciones[-1] == "comprar" and a.memoria:
+                    last_mem = a.memoria[-1]
+                    if last_mem.startswith("compré "):
+                        top_buys[last_mem.split("compré ")[1].split(" a $")[0]] += 1
+            buy_str = ", ".join(f"{n}×{c}" for n, c in top_buys.most_common(3)) or "ninguno compró"
+            self.peer_signal = (
+                f"{dict(last_actions)} · top compras: {buy_str}"
+            )
+        else:
+            self.peer_signal = "(no hay turno previo)"
 
         self.agents.shuffle_do("step")
         self.steps_run += 1
@@ -210,11 +294,17 @@ class MarketModel(mesa.Model):
 # --------------------------------------------------------------------------- #
 #  Visualización
 # --------------------------------------------------------------------------- #
+def _persona_key(persona: str) -> str:
+    """Etiqueta corta y legible para el plot (≤ 18 chars)."""
+    head = persona.split(":")[0].split(",")[0].strip()
+    return head[:18]
+
+
 def plot_results(model: MarketModel, out_dir: Path) -> Path:
     actions_by_persona: dict[str, Counter[str]] = defaultdict(Counter)
     spend_by_persona: dict[str, int] = defaultdict(int)
     for ag in model.agents:
-        key = ag.persona.split(",")[0]  # primera palabra clave
+        key = _persona_key(ag.persona)
         for act in ag.acciones:
             actions_by_persona[key][act] += 1
         spend_by_persona[key] += ag.gastado

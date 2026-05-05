@@ -1,0 +1,3 @@
+$env:OLLAMA_HOST = "http://localhost:11434"
+$env:OLLAMA_MODEL = "llama3.2:3b"
+python mesa_llm_template/examples/opcion_a_consumidor.py --provider ollama --steps 15
