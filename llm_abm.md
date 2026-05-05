@@ -1142,7 +1142,7 @@ python examples/opcion_a_consumidor.py --provider ollama
 - Si te entusiasmás: armá tu propio prompt para un dominio que te importe
 - Mandá *issues* / *PRs* a Mesa-LLM — la comunidad es chica y receptiva
 
-> El campo está **inmaduro** en el mejor sentido: hay lugar para vos.
+> El campo está **inmaduro** en el mejor sentido: hay mucho por hacer
 
 ---
 
@@ -1152,7 +1152,6 @@ python examples/opcion_a_consumidor.py --provider ollama
 > Estamos pasando de **simular comportamientos**…
 > a simular **mentes**.
 
-<p class="attrib">— y vos vas a ser parte de eso</p>
 
 ---
 
