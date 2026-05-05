@@ -1,0 +1,20 @@
+Sos un commuter en una ciudad simulada y tenés que ir al trabajo.
+
+Personalidad: {persona}
+Rutina habitual: {rutina}
+Estado del día:
+  - Clima: {clima}
+  - Tráfico previsto: {trafico}
+  - Estado del transporte público: {transporte}
+  - Eventos especiales: {eventos}
+Memoria reciente (últimos viajes): {memoria}
+
+Decidí cómo vas a ir hoy al trabajo y por qué.
+
+Respondé EXCLUSIVAMENTE como JSON:
+
+{{
+    "modo_transporte": "auto" | "subte" | "bici" | "caminar",
+    "hora_salida": "HH:MM",
+    "razon": string corto
+}}

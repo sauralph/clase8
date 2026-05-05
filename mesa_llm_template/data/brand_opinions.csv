@@ -1,0 +1,33 @@
+id,brand,sentiment,text,persona_hint
+1,Aurora,positivo,"Compré un producto de Aurora y la calidad superó mis expectativas",entusiasta
+2,Aurora,negativo,"El servicio post-venta de Aurora es horrible, nadie atiende",frustrado
+3,Aurora,neutro,"Lo de Aurora está OK, ni bueno ni malo, cumple",pragmatico
+4,Aurora,positivo,"La gente de Aurora me trató re bien en el local, recomendable",satisfecho
+5,Aurora,positivo,"El nuevo modelo de Aurora es un golazo, vale lo que cuesta",fashion-victim
+6,Aurora,negativo,"Aurora subió los precios sin avisar, una vergüenza",ahorrativo
+7,Aurora,neutro,"Aurora hace marketing pero el producto es como cualquier otro",esceptico
+8,Aurora,positivo,"Después de 3 años de uso mi Aurora sigue como nueva",fiel
+9,Polaris,positivo,"Polaris me cambió la vida con su nuevo lanzamiento",entusiasta
+10,Polaris,negativo,"Polaris se rompió a la semana, una estafa",frustrado
+11,Polaris,positivo,"La calidad de Polaris es excelente para el precio",ahorrativo
+12,Polaris,neutro,"Polaris cumple lo que promete, nada del otro mundo",pragmatico
+13,Polaris,negativo,"Estuve esperando 2 meses el envío de Polaris, no lo recomiendo",molesto
+14,Polaris,positivo,"El soporte técnico de Polaris me ayudó en 5 minutos",satisfecho
+15,Polaris,negativo,"Polaris copió a la competencia, no innova nada",esceptico
+16,Polaris,positivo,"Llevo 2 años con Polaris y no la cambio por nada",fiel
+17,Tornado,negativo,"Tornado es lo peor que probé, me arrepiento de la compra",frustrado
+18,Tornado,positivo,"Tornado tiene la mejor relación precio-calidad del mercado",ahorrativo
+19,Tornado,neutro,"Tornado funciona, no esperen mucho más",pragmatico
+20,Tornado,positivo,"El diseño de Tornado es de otro nivel, todos me preguntan",fashion-victim
+21,Tornado,negativo,"Tornado tiene un servicio al cliente nefasto",molesto
+22,Tornado,positivo,"Después de probar 3 marcas me quedo con Tornado",satisfecho
+23,Tornado,negativo,"Tornado promete mucho pero entrega poco",esceptico
+24,Tornado,neutro,"Tornado es lo que esperaba, sin sorpresas",pragmatico
+25,Lumen,positivo,"Lumen es la mejor inversión que hice este año",entusiasta
+26,Lumen,negativo,"Lumen aumentó el precio un 40%, es una locura",ahorrativo
+27,Lumen,positivo,"Lumen me sorprendió, tiene features que ni esperaba",fashion-victim
+28,Lumen,neutro,"Lumen está OK, hay mejores opciones",pragmatico
+29,Lumen,negativo,"Lumen me cobró dos veces y todavía no me devuelven",frustrado
+30,Lumen,positivo,"El packaging de Lumen es premium, se nota la inversión",satisfecho
+31,Lumen,negativo,"Lumen es marketing puro, el producto es promedio",esceptico
+32,Lumen,positivo,"Mi Lumen lleva 5 años funcionando perfecto, los recomiendo",fiel
